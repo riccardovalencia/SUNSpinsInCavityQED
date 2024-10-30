@@ -34,7 +34,7 @@ The variables needed are explained in the input.py script contained in the folde
 
 Clone the repository:
 ```bash
-git clone https://github.com/rvalencia1995/SUNSpinsInCavityQED.git
+git clone https://github.com/riccardovalencia/SUNSpinsInCavityQED.git
 ```
 
 ## License
