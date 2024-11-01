@@ -1,117 +1,153 @@
-import functools
-import os
-import pandas as pd
-import csv
-from pathlib import Path
+
 import numpy as np
-import json
+import pandas as pd
+import os,  math, functools
+from scipy.fft import fft, fftfreq
+
+
+def get_obs(directory, name_obs, file_extension):
+    name_file_obs = '{}/{}.{}'.format(directory,name_obs,file_extension)
+    if os.path.isfile(name_file_obs) and file_extension == 'npy':
+        obs = np.load(name_file_obs)
+        return np.array(obs), True
+    else:
+        return 0, False
+    
+
+# time average of an observable
+                                     
+def time_average( observable , time):
+    observable_average = []
+    dt = []
+    for i in range(len(time)-1):
+        dt.append(time[i+1]-time[i])
+
+    obs_av_single_dt = 0
+    for i in range(len(dt)):
+        obs_av_single_dt += (observable[i+1] + observable[i])/2 * dt[i] 
+        observable_average.append(obs_av_single_dt / (time[i+1]-time[0]) )
+       
+    observable_average = np.array(observable_average)
+    return observable_average
+
 
 def conjunction(*conditions):
     return functools.reduce(np.logical_and, conditions)
 
 
-def check_existence_data(folder,args,name_csv='data'):
+# return the dataset which satisfies the conditions imposed.
 
-    list_args   = list(args.keys())
+def get_subdataset(df,data_filter_list):
+    name_filter   = [data_filter[0] for data_filter in data_filter_list]
+    values_filter = [data_filter[1] for data_filter in data_filter_list]
+    
+    header = df.columns.values.tolist()
+    index  = df.index
+    c = []
+    for name in name_filter:
+        if name in df.head():
+            c.append(df[name] == values_filter[name_filter.index(name)])
 
-    with open(f'{folder}/{name_csv}.csv') as data_csv:
-        df = pd.read_csv(data_csv)
+    condition = conjunction(*c)
+    data_frame = df[condition]
+#     print(data_frame)
+    return data_frame
+    
 
-        header = df.columns.values.tolist()
-        index  = df.index
+    
+def get_directories(path,csv_file,param_fixed_list,param_switch_list):
+   
+    # select sub_dataset with some parameters
+    
+    with open('{}'.format(csv_file)) as data_csv:
+        df      = pd.read_csv(data_csv)        
 
-        if list_args.sort() != header.sort():
-            print('Headers do not match')
-            return -1
-
-        c = []
+        # filter dataset based on fixed parameters
+        df_filtered = get_subdataset(df,param_fixed_list)
         
-        for name in args:
-            c.append(df[name]==args[name])                
-        condition = conjunction(*c)
+        # sort filtered dataset based on the switch parameter
+        # for j in range(len(param_switch_list)):
+        #     df_filtered = df_filtered.sort_values(by=[param_switch[j][0]],ascending=True)
 
-        if len(index[condition].to_list()) > 0:
-            print('Data already exist')
-            return 1
+        # sort filtered dataset based on the switch parameter
+        for param_switch in param_switch_list:
+            df_filtered = df_filtered.sort_values(by=[param_switch[0]],ascending=True)
 
+        switch_exist = []
+        for j in range(len(param_switch_list)):
+            switch_exist.append(df_filtered[param_switch_list[j][0]].tolist())
+            
+        indices = df_filtered.index.tolist()
+        
+        
+        # get folder names containing the desired simulations
+        list_directory = []
+        for index in indices:
+            list_directory += [filename for filename in os.listdir(path) if filename.endswith('_{}_processed'.format(index+1))]
+        
+        return list_directory, switch_exist
+        
+        
+def get_obs_vs_time(path,csv_file,param_fixed_list,param_switch_list,name_obs, perform_average, compute_fluctuactions=False):
+    
+    directories, switch = get_directories(path,csv_file,param_fixed_list,param_switch_list)
+    switch_obs = []
+    obs_list = []
+    time_list = []
+    
+    for directory in directories:
+        obs, success = get_obs('{}/{}'.format(path,directory), name_obs, 'npy')
+        timesteps, _ = get_obs('{}/{}'.format(path,directory), 'timesteps', 'npy')
+
+        if success:
+            
+            if compute_fluctuactions:
+                start = int(len(timesteps)*0.5)
+#                 start = 1
+#                 if obs[0]>1E-4:
+#                     obs /= obs[0]
+                obs_av = time_average(obs[start:], timesteps[start:])
+                timesteps = timesteps[start+1:]
+
+                obs = obs[start+1:] - obs_av[-1]#/(np.max(obs[start+1:]) + obs_av[-1])
+#                 obs /= obs_av[-1]
+                if perform_average:
+                    obs = np.sqrt(time_average(np.square(obs), timesteps))
+#                     obs = [0,np.sqrt(np.average(np.square(obs)))]
+                    timesteps = timesteps[1:]
+
+
+            elif perform_average:
+                start = int(len(timesteps)*0.5)
+                obs = time_average(obs[start:], timesteps[start:])
+                timesteps = timesteps[start+1:]
+                    
+            for j in range(len(switch)):
+                switch_obs.append(switch[j][directories.index(directory)])
+            obs_list.append(obs)
+            time_list.append(timesteps)
+    
         else:
-            return 0
+            return [float('nan')], [float('nan')], [float('nan')]
+    return time_list, obs_list, switch_obs
 
 
+def fourier_analysis(obs,time, threshold):
+    
+        dt_l = []
+        for k in range(len(time)-1):
+            dt_l.append(time[k+1]-time[k])
+            
+        if obs[0]>1E-6:
+            obs /= obs[0]
+                
+        dt = np.average(dt_l)
+        yf = fft(obs)
+        N  = len(obs)
+        xf = fftfreq(N, dt)[:N//2]*2*math.pi
 
-def get_index_csv(folder,args,name_csv='data'):
-    list_args = list(args.keys())
-    with open(f'{folder}/{name_csv}.csv') as data_csv:
-        df = pd.read_csv(data_csv)
-
-        header = df.columns.values.tolist()
-        index  = df.index
-
-        print(index)
-
-        if list_args.sort() != header.sort():
-            print('Headers do not match')
-            return -1
-
-        c = []
-        
-        for name in args:
-            c.append(df[name]==args[name])                
-        condition = conjunction(*c)
-
-
-
-        if len(index[condition].to_list()) > 0:
-            print('Data already exist')
-            return index[condition].to_list()[-1]
-        else:
-            return len(index.to_list()) + 1
-
-
-def get_last_index(folder,args,name_csv='data'):
-    list_args = list(args.keys())
-    with open(f'{folder}/{name_csv}.csv') as data_csv:
-        df = pd.read_csv(data_csv)
-        index  = df.index
-
-        
-        return len(index.to_list()) + 1
-
-
-
-def create_directory_and_csv(main_dir,name_folder,header):
-
-    folder      = f"{main_dir}{name_folder}"
-    if os.path.isdir(folder)==False:
-        Path(folder).mkdir()
-
-    with open(f'{folder}/data.csv', mode='a+') as data_csv:
-        data = csv.writer(data_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        if os.stat(data_csv.name).st_size == 0:
-            data.writerow(header)
-
-    return folder , True
-
-
-
-def save_data(folder,name_csv,prefix,index,d,args_csv, args_json, obs,times):
-
-
-    with open(f'{folder}/{name_csv}.csv', mode='a+') as data_csv:
-        data = csv.writer(data_csv, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        data.writerow(list(args_csv.values()))
-
-    save_folder = f"{folder}/{prefix}{d}_{index}"
-
-    if os.path.isdir(save_folder)==False:
-        Path(save_folder).mkdir()
-
-    for _ , O in enumerate(obs):
-        np.save(f'{save_folder}/{O}.npy',obs[O])
-    np.save(f'{save_folder}/time.npy',times)
-
-    with open(f'{save_folder}/input.json','w') as f:
-        json.dump(args_json,f)
-
-
-    return save_folder, True
+        yf_abs = 2.0/N * np.abs(yf)
+        indices = yf_abs > threshold
+#         print(indices)
+        yf_clean = indices * yf
+        return int(len(np.where(yf_clean > 1E-6)[0])/2)
