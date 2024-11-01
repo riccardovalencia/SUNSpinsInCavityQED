@@ -17,7 +17,7 @@ scaling_analysis : supplemental information such as scaling analysis in the time
 
 ## Prerequisites
 
-Standard Python libraries including numpy, Scipy.
+Standard Python libraries including numpy, Scipy, pandas.
 
 ## Usage
 The scripts for reproducing the results in https://arxiv.org/abs/2210.14224 are in the src folder.
